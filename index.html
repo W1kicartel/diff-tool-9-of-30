@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Diff Tool — text comparison</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --add-bg: #12361f;
+    --add-text: #7ee787;
+    --add-word: #2ea04366;
+    --del-bg: #3a1418;
+    --del-text: #ffa198;
+    --del-word: #f8514966;
+    --gutter: #1c2128;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 20px 24px 8px;
+  }
+  h1 { margin: 0; font-size: 1.45rem; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+  main { padding: 12px 24px 40px; }
+  .inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 720px) { .inputs { grid-template-columns: 1fr; } }
+  .field label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 180px;
+    resize: vertical;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    tab-size: 4;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .toggle button {
+    background: var(--panel);
+    color: var(--muted);
+    border: none;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .toggle button.active { background: var(--accent); color: #0d1117; font-weight: 600; }
+  .opt { font-size: 0.82rem; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .btn-sample {
+    margin-left: auto;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .stats {
+    display: flex;
+    gap: 18px;
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+  }
+  .stats .added { color: var(--add-text); }
+  .stats .removed { color: var(--del-text); }
+  .stats .same { color: var(--muted); }
+
+  .diff {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: auto;
+    background: var(--panel);
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.84rem;
+  }
+  /* ---- unified view ---- */
+  .row { display: flex; white-space: pre-wrap; word-break: break-word; }
+  .row .gutter {
+    flex: 0 0 84px;
+    text-align: right;
+    padding: 0 10px;
+    color: var(--muted);
+    background: var(--gutter);
+    user-select: none;
+    border-right: 1px solid var(--border);
+  }
+  .row .sign { flex: 0 0 20px; text-align: center; color: var(--muted); user-select: none; }
+  .row .text { flex: 1 1 auto; padding-right: 12px; }
+  .row.equal {}
+  .row.insert { background: var(--add-bg); }
+  .row.insert .sign { color: var(--add-text); }
+  .row.delete { background: var(--del-bg); }
+  .row.delete .sign { color: var(--del-text); }
+  .word-add { background: var(--add-word); border-radius: 3px; }
+  .word-del { background: var(--del-word); border-radius: 3px; }
+
+  /* ---- side-by-side view ---- */
+  .sbs { display: flex; }
+  .sbs .col { flex: 1 1 50%; min-width: 0; }
+  .sbs .col + .col { border-left: 1px solid var(--border); }
+  .empty-line { background: #161b2155; }
+
+  .placeholder { padding: 28px; text-align: center; color: var(--muted); }
+  footer { padding: 0 24px 30px; color: var(--muted); font-size: 0.78rem; }
+  code { background: #1f2630; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Diff Tool</h1>
+  <div class="sub">LCS-based text comparison — the algorithm behind <code>git diff</code>. Tool 9 of 30.</div>
+</header>
+
+<main>
+  <div class="inputs">
+    <div class="field">
+      <label for="old">Original</label>
+      <textarea id="old" spellcheck="false" placeholder="Paste the original text…"></textarea>
+    </div>
+    <div class="field">
+      <label for="new">Changed</label>
+      <textarea id="new" spellcheck="false" placeholder="Paste the changed text…"></textarea>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="toggle" id="view-toggle">
+      <button data-view="unified" class="active">Unified</button>
+      <button data-view="split">Side&nbsp;by&nbsp;side</button>
+    </div>
+    <label class="opt"><input type="checkbox" id="words" checked /> Highlight word changes</label>
+    <label class="opt"><input type="checkbox" id="ignore-ws" /> Ignore leading/trailing spaces</label>
+    <button class="btn-sample" id="sample">Load sample</button>
+  </div>
+
+  <div class="stats" id="stats" hidden>
+    <span class="added">+<span id="n-add">0</span> added</span>
+    <span class="removed">−<span id="n-del">0</span> removed</span>
+    <span class="same"><span id="n-same">0</span> unchanged</span>
+  </div>
+
+  <div class="diff" id="output">
+    <div class="placeholder">Enter text on both sides to see the difference.</div>
+  </div>
+</main>
+
+<footer>
+  Built with a hand-written LCS diff engine (<code>diff.js</code>, zero dependencies). No data leaves your browser.
+</footer>
+
+<script src="diff.js"></script>
+<script>
+  'use strict';
+
+  const $old = document.getElementById('old');
+  const $new = document.getElementById('new');
+  const $out = document.getElementById('output');
+  const $stats = document.getElementById('stats');
+  const $words = document.getElementById('words');
+  const $ignoreWs = document.getElementById('ignore-ws');
+  let view = 'unified';
+
+  // Escape text for safe innerHTML insertion (XSS-safe rendering).
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  // Render a word-level diff of a delete/insert pair into highlighted spans.
+  // side = 'del' shows removed words; side = 'add' shows added words.
+  function renderWordDiff(oldLine, newLine, side) {
+    const ops = Diff.diffWords(oldLine, newLine);
+    let html = '';
+    for (const op of ops) {
+      if (op.type === 'equal') {
+        html += esc(op.value);
+      } else if (op.type === 'delete' && side === 'del') {
+        html += '<span class="word-del">' + esc(op.value) + '</span>';
+      } else if (op.type === 'insert' && side === 'add') {
+        html += '<span class="word-add">' + esc(op.value) + '</span>';
+      }
+    }
+    return html;
+  }
+
+  // Pair consecutive delete+insert runs so we can show intra-line word diffs.
+  // Returns an array of "blocks": equal lines pass through; a run of deletes
+  // followed by a run of inserts is zipped line-by-line for word highlighting.
+  function pairChanges(ops) {
+    const out = [];
+    let i = 0;
+    while (i < ops.length) {
+      const op = ops[i];
+      if (op.type === 'equal') { out.push({ kind: 'equal', op: op }); i++; continue; }
+
+      const dels = [];
+      const adds = [];
+      while (i < ops.length && ops[i].type === 'delete') { dels.push(ops[i]); i++; }
+      while (i < ops.length && ops[i].type === 'insert') { adds.push(ops[i]); i++; }
+      out.push({ kind: 'change', dels: dels, adds: adds });
+    }
+    return out;
+  }
+
+  function gutter(oldN, newN) {
+    const o = oldN == null ? '' : oldN;
+    const n = newN == null ? '' : newN;
+    return '<span class="gutter">' + o + ' &nbsp; ' + n + '</span>';
+  }
+
+  function renderUnified(ops) {
+    const wantWords = $words.checked;
+    const blocks = pairChanges(ops);
+    let html = '';
+    for (const b of blocks) {
+      if (b.kind === 'equal') {
+        const o = b.op;
+        html += '<div class="row equal">' + gutter(o.oldLine, o.newLine) +
+                '<span class="sign"> </span><span class="text">' + esc(o.value) + '</span></div>';
+        continue;
+      }
+      const pairCount = wantWords ? Math.min(b.dels.length, b.adds.length) : 0;
+      b.dels.forEach(function (d, idx) {
+        const text = (idx < pairCount)
+          ? renderWordDiff(d.value, b.adds[idx].value, 'del')
+          : esc(d.value);
+        html += '<div class="row delete">' + gutter(d.oldLine, null) +
+                '<span class="sign">−</span><span class="text">' + text + '</span></div>';
+      });
+      b.adds.forEach(function (a, idx) {
+        const text = (idx < pairCount)
+          ? renderWordDiff(b.dels[idx].value, a.value, 'add')
+          : esc(a.value);
+        html += '<div class="row insert">' + gutter(null, a.newLine) +
+                '<span class="sign">+</span><span class="text">' + text + '</span></div>';
+      });
+    }
+    return html;
+  }
+
+  function renderSplit(ops) {
+    const wantWords = $words.checked;
+    const blocks = pairChanges(ops);
+    let left = '';
+    let right = '';
+    function lrow(cls, num, text) {
+      return '<div class="row ' + cls + '"><span class="gutter">' + (num == null ? '' : num) +
+             '</span><span class="text">' + text + '</span></div>';
+    }
+    for (const b of blocks) {
+      if (b.kind === 'equal') {
+        const o = b.op;
+        left += lrow('equal', o.oldLine, esc(o.value));
+        right += lrow('equal', o.newLine, esc(o.value));
+        continue;
+      }
+      const max = Math.max(b.dels.length, b.adds.length);
+      const pairCount = wantWords ? Math.min(b.dels.length, b.adds.length) : 0;
+      for (let k = 0; k < max; k++) {
+        const d = b.dels[k];
+        const a = b.adds[k];
+        if (d) {
+          const t = (k < pairCount) ? renderWordDiff(d.value, b.adds[k].value, 'del') : esc(d.value);
+          left += lrow('delete', d.oldLine, t);
+        } else {
+          left += lrow('equal empty-line', null, '');
+        }
+        if (a) {
+          const t = (k < pairCount) ? renderWordDiff(b.dels[k].value, a.value, 'add') : esc(a.value);
+          right += lrow('insert', a.newLine, t);
+        } else {
+          right += lrow('equal empty-line', null, '');
+        }
+      }
+    }
+    return '<div class="sbs"><div class="col">' + left + '</div><div class="col">' + right + '</div></div>';
+  }
+
+  function compare() {
+    let oldText = $old.value;
+    let newText = $new.value;
+
+    if (oldText === '' && newText === '') {
+      $out.innerHTML = '<div class="placeholder">Enter text on both sides to see the difference.</div>';
+      $stats.hidden = true;
+      return;
+    }
+
+    // Optional pre-processing: trim each line so cosmetic whitespace is ignored.
+    if ($ignoreWs.checked) {
+      const trim = function (t) {
+        return Diff.splitLines(t).map(function (l) { return l.trim(); }).join('\n');
+      };
+      oldText = trim(oldText);
+      newText = trim(newText);
+    }
+
+    const ops = Diff.diffLines(oldText, newText);
+    const stats = Diff.diffStats(ops);
+    document.getElementById('n-add').textContent = stats.added;
+    document.getElementById('n-del').textContent = stats.removed;
+    document.getElementById('n-same').textContent = stats.unchanged;
+    $stats.hidden = false;
+
+    if (stats.added === 0 && stats.removed === 0) {
+      $out.innerHTML = '<div class="placeholder">The two texts are identical.</div>';
+      return;
+    }
+
+    $out.innerHTML = (view === 'unified') ? renderUnified(ops) : renderSplit(ops);
+  }
+
+  // View toggle
+  document.getElementById('view-toggle').addEventListener('click', function (e) {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    view = btn.getAttribute('data-view');
+    Array.prototype.forEach.call(this.children, function (b) {
+      b.classList.toggle('active', b === btn);
+    });
+    compare();
+  });
+
+  $old.addEventListener('input', compare);
+  $new.addEventListener('input', compare);
+  $words.addEventListener('change', compare);
+  $ignoreWs.addEventListener('change', compare);
+
+  document.getElementById('sample').addEventListener('click', function () {
+    $old.value =
+      'function greet(name) {\n' +
+      '  const msg = "Hello, " + name;\n' +
+      '  console.log(msg);\n' +
+      '  return msg;\n' +
+      '}\n' +
+      '\n' +
+      'greet("world");';
+    $new.value =
+      'function greet(name, punctuation) {\n' +
+      '  const msg = `Hello, ${name}${punctuation}`;\n' +
+      '  console.log(msg);\n' +
+      '  return msg;\n' +
+      '}\n' +
+      '\n' +
+      'greet("world", "!");';
+    compare();
+  });
+</script>
+</body>
+</html>
